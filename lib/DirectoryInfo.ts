@@ -41,8 +41,9 @@ class DirectoryInfo extends FileInfoBase {
     private _filesList: FileInfo[];
     private _subDirectoriesList: DirectoryInfo[];
     private _initialized: bool;
+    private _version: string;
 
-    constructor(path: string, rootPath: string) {
+    constructor(path: string, rootPath: string, version?: string) {
         super(path, rootPath);
 
         this._filesMapping = [];
@@ -50,6 +51,7 @@ class DirectoryInfo extends FileInfoBase {
         this._filesList = [];
         this._subDirectoriesList = [];
         this._initialized = false;
+        this._version = version;
     }
 
     ensureCreated(): Promise {
@@ -72,7 +74,7 @@ class DirectoryInfo extends FileInfoBase {
     }
 
     parent(): DirectoryInfo {
-        return new DirectoryInfo(pathUtil.dirname(this.path()), this.rootPath());
+        return new DirectoryInfo(pathUtil.dirname(this.path()), this.rootPath(), this._version);
     }
 
     initializeFilesAndSubDirectoriesLists(): Promise {
@@ -93,19 +95,23 @@ class DirectoryInfo extends FileInfoBase {
             return Utils.attempt(() => {
                 try {
                     var files = listDir(this.path());
+
+                    var version = this.determineVersion(files);
+                    if (!!version) this._version = version;
+
                     files.forEach((file: any) => {
                         var path = pathUtil.join(this.path(), file.fileName);
 
                         if (file.fileName !== "." && file.fileName !== "..") {
                             if (file.isDirectory) {
                                 // Store both as mapping as an array
-                                var directoryInfo = new DirectoryInfo(path, this.rootPath());
+                                var directoryInfo = new DirectoryInfo(path, this.rootPath(), this._version);
                                 directoryInfo.setExists(true);
                                 subDirectoriesMapping[file.fileName.toUpperCase()] = directoryInfo;
                                 subDirectoriesList.push(directoryInfo);
                             } else {
                                 // Store both as mapping as an array
-                                var fileInfo = new FileInfo(path, this.rootPath(), file.size, file.modifiedTime);
+                                var fileInfo = new FileInfo(path, this.rootPath(), file.size, file.modifiedTime, this._version);
                                 filesMapping[file.fileName.toUpperCase()] = fileInfo;
                                 filesList.push(fileInfo);
                             }
@@ -165,4 +171,28 @@ class DirectoryInfo extends FileInfoBase {
 
         return false;
     }
+
+    determineVersion(files: any[]): string {
+        for (var i = 0; i < files.length; i++) {
+            var file = files[i];
+            if (file.fileName === "." || file.fileName === ".." || file.isDirectory) continue;
+            
+            if (file.fileName == 'package.json') {
+                var path = pathUtil.join(this.path(), file.fileName);
+                try {
+                    var content = fs.readFileSync(path);
+                    var packageJson = JSON.parse(content);
+                    if (!!packageJson.version) {
+                        return packageJson.version;
+                    }
+                } catch(err) {
+                    console.warn("failed to parse package.json content from " + path);
+                }            
+            }
+        }
+
+        return null;
+    }
+    
 }
+

@@ -144,6 +144,81 @@ suite('Kudu Sync Functional Tests', function () {
         });
     });
 
+    test('Same file date and size is skipped', function(done) {
+        generateFromFile("dummy.json", '{"version":"1.2.3"}');
+        var filePath = pathUtil.join(baseTestTempDir, testDir, fromDir, "dummy.json");
+        var mtime = new Date();
+        fs.utimesSync(filePath, mtime, mtime);
+        
+        runKuduSyncTestScenario([], ["dummy.json"], null, function () {
+            generateFromFile("dummy.json", '{"version":"1.2.4"}');
+            fs.utimesSync(filePath, mtime, mtime);
+            runKuduSyncTestScenario([], ["dummy.json"], null, function (err) {
+                err.message.should.equal('expected \'{"version":"1.2.4"}\' to be \'{"version":"1.2.3"}\'');
+                done();
+            });
+        });
+    });
+
+    test('different file date is not skipped', function(done) {
+        generateFromFile("dummy.json", '{"version":"1.2.3"}');
+        var filePath = pathUtil.join(baseTestTempDir, testDir, fromDir, "dummy.json");
+        var mtime = new Date();
+        fs.utimesSync(filePath, mtime, mtime);
+        
+        runKuduSyncTestScenario([], ["dummy.json"], null, function () {
+            generateFromFile("dummy.json", '{"version":"1.2.4"}');
+            runKuduSyncTestScenario([], ["dummy.json"], null, done);
+        });
+    });
+
+    test('Same date with different version is not skipped', function(done) {
+        generateFromFile("package.json", '{"version":"1.2.3"}');
+        generateFromFile("test1", "a");
+        var mtime = new Date();
+        fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "package.json"), mtime, mtime);
+        fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "test1"), mtime, mtime);
+        
+        runKuduSyncTestScenario([], ["package.json", "test1"], null, function () {
+            generateFromFile("package.json", '{"version":"1.2.4"}');
+            generateFromFile("test1", "b");
+            fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "package.json"), mtime, mtime);
+            fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "test1"), mtime, mtime);
+            runKuduSyncTestScenario([], ["package.json", "test1"], null, done)            
+        });
+    });
+
+    test('version is inherited by subdirs', function(done) {
+        generateFromFile("package.json", '{"version":"1.2.3"}');
+        generateFromFile("dir/test1", "a");
+        var mtime = new Date();
+        fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "package.json"), mtime, mtime);
+        fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "dir/test1"), mtime, mtime);
+        
+        runKuduSyncTestScenario([], ["package.json", "dir/test1"], null, function () {
+            generateFromFile("package.json", '{"version":"1.2.4"}');
+            generateFromFile("dir/test1", "b");
+            fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "package.json"), mtime, mtime);
+            fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "dir/test1"), mtime, mtime);
+            runKuduSyncTestScenario([], ["package.json", "dir/test1"], null, done)            
+        });
+    });
+
+    test('Same date with same version is skipped', function(done) {
+        generateFromFile("package.json", '{"version":"1.2.3"}');
+        generateFromFile("test1", "abc");
+        var mtime = new Date();
+        fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "test1"), mtime, mtime);
+        
+        runKuduSyncTestScenario([], ["package.json", "test1"], null, function () {
+            generateFromFile("test1", "def");
+            fs.utimesSync(pathUtil.join(baseTestTempDir, testDir, fromDir, "test1"), mtime, mtime);
+            runKuduSyncTestScenario([], ["package.json", "test1"], null, function(err) {
+                err.message.should.equal("expected 'def' to be 'abc'");
+                done();
+            });          
+        });
+    });
     test('No previous manifest will not clean target directory', function (done) {
         runKuduSyncTestScenario(["file1"], ["file1"], null, function () {
             // Generating files only in the destination directory, those files shouldn't be removed
@@ -439,7 +514,7 @@ function generateFromFiles(files) {
     }
 }
 
-function generateFromFile(fileName) {
+function generateFromFile(fileName, content) {
     var isRemove = false;
     // Find whether to create/update or remove file
     if (fileName.indexOf("-") == 0) {
@@ -454,19 +529,18 @@ function generateFromFile(fileName) {
         return "";
     }
     else {
-        return generateFile(filePath);
+        return generateFile(filePath, content);
     }
 }
 
-function generateToFile(fileName) {
+function generateToFile(fileName, content) {
     var filePath = pathUtil.join(baseTestTempDir, testDir, toDir, fileName);
-    return generateFile(filePath);
+    return generateFile(filePath, content);
 }
 
 function filesShouldBeEqual(fromPath, toPath, fileName) {
     fromPath = pathUtil.join(fromPath, fileName);
     toPath = pathUtil.join(toPath, fileName);
-
     // Only validate content if the from file exists
     var expectedContent = null;
     if (fs.existsSync(fromPath)) {
@@ -475,7 +549,6 @@ function filesShouldBeEqual(fromPath, toPath, fileName) {
             expectedContent = fs.readFileSync(fromPath, 'utf8');
         }
     }
-
     fileShouldExist(toPath, expectedContent);
 }
 
