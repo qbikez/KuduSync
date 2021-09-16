@@ -148,12 +148,13 @@ var __extends = this.__extends || function (d, b) {
 }
 var FileInfo = (function (_super) {
     __extends(FileInfo, _super);
-    function FileInfo(path, rootPath, size, modifiedTime) {
+    function FileInfo(path, rootPath, size, modifiedTime, version) {
         _super.call(this, path, rootPath);
         Ensure.argNotNull(size, "size");
         Ensure.argNotNull(modifiedTime, "modifiedTime");
         this._size = size;
         this._modifiedTime = new Date(modifiedTime);
+        this._version = version;
     }
     FileInfo.prototype.modifiedTime = function () {
         return this._modifiedTime;
@@ -161,11 +162,22 @@ var FileInfo = (function (_super) {
     FileInfo.prototype.size = function () {
         return this._size;
     };
+    FileInfo.prototype.version = function () {
+        return this._version;
+    };
     FileInfo.prototype.equals = function (otherFile) {
         if(this.modifiedTime() == null || otherFile.modifiedTime() == null) {
             return false;
         }
-        return this.modifiedTime().getTime() === otherFile.modifiedTime().getTime() && this.size() === otherFile.size();
+        if(this.modifiedTime().getTime() !== otherFile.modifiedTime().getTime() || this.size() !== otherFile.size()) {
+            return false;
+        }
+        if(!!this.version() && !!otherFile.version() && this.version() != otherFile.version()) {
+            console.log("copying different version file '" + this.name() + "'@" + this.version() + " != '" + otherFile.name() + "'@" + otherFile.version());
+            return false;
+        }
+        console.log("skipping same file '" + this.name() + "'@" + this.version() + " == '" + otherFile.name() + "'@" + otherFile.version());
+        return true;
     };
     return FileInfo;
 })(FileInfoBase);
@@ -200,13 +212,14 @@ if(listDir == null) {
 }
 var DirectoryInfo = (function (_super) {
     __extends(DirectoryInfo, _super);
-    function DirectoryInfo(path, rootPath) {
+    function DirectoryInfo(path, rootPath, version) {
         _super.call(this, path, rootPath);
         this._filesMapping = [];
         this._subDirectoriesMapping = [];
         this._filesList = [];
         this._subDirectoriesList = [];
         this._initialized = false;
+        this._version = version;
     }
     DirectoryInfo.prototype.ensureCreated = function () {
         var _this = this;
@@ -226,7 +239,7 @@ var DirectoryInfo = (function (_super) {
         return Q.resolve();
     };
     DirectoryInfo.prototype.parent = function () {
-        return new DirectoryInfo(pathUtil.dirname(this.path()), this.rootPath());
+        return new DirectoryInfo(pathUtil.dirname(this.path()), this.rootPath(), this._version);
     };
     DirectoryInfo.prototype.initializeFilesAndSubDirectoriesLists = function () {
         if(!this._initialized && this.exists()) {
@@ -244,16 +257,23 @@ var DirectoryInfo = (function (_super) {
             return Utils.attempt(function () {
                 try  {
                     var files = listDir(_this.path());
+                    var version = _this.determineVersion(files);
+                    if(!!version) {
+                        _this._version = version;
+                    }
+                    console.log("version is: ", _this._version);
                     files.forEach(function (file) {
                         var path = pathUtil.join(_this.path(), file.fileName);
                         if(file.fileName !== "." && file.fileName !== "..") {
                             if(file.isDirectory) {
-                                var directoryInfo = new DirectoryInfo(path, _this.rootPath());
+                                console.log('found dir', path, "@", _this._version);
+                                var directoryInfo = new DirectoryInfo(path, _this.rootPath(), _this._version);
                                 directoryInfo.setExists(true);
                                 subDirectoriesMapping[file.fileName.toUpperCase()] = directoryInfo;
                                 subDirectoriesList.push(directoryInfo);
                             } else {
-                                var fileInfo = new FileInfo(path, _this.rootPath(), file.size, file.modifiedTime);
+                                console.log('found file', path);
+                                var fileInfo = new FileInfo(path, _this.rootPath(), file.size, file.modifiedTime, _this._version);
                                 filesMapping[file.fileName.toUpperCase()] = fileInfo;
                                 filesList.push(fileInfo);
                             }
@@ -298,12 +318,42 @@ var DirectoryInfo = (function (_super) {
         }
         return false;
     };
+    DirectoryInfo.prototype.determineVersion = function (files) {
+        console.log("looking for version file in ", this.path(), "parent version:", this._version);
+        for(var i = 0; i < files.length; i++) {
+            var file = files[i];
+            if(file.fileName === "." || file.fileName === ".." || file.isDirectory) {
+                continue;
+            }
+            if(file.fileName == 'package.json') {
+                var path = pathUtil.join(this.path(), file.fileName);
+                console.log("parsing version file " + path);
+                try  {
+                    var content = fs.readFileSync(path);
+                    var packageJson = JSON.parse(content);
+                    if(!!packageJson.version) {
+                        return packageJson.version;
+                    }
+                } catch (err) {
+                    console.warn("failed to parse package.json content from " + path);
+                }
+            }
+        }
+        return null;
+    };
     return DirectoryInfo;
 })(FileInfoBase);
 var nodePath = require("path");
+var ManifestEntry = (function () {
+    function ManifestEntry(filename) {
+        this.filename = filename;
+    }
+    return ManifestEntry;
+})();
 var Manifest = (function () {
     function Manifest() {
-        this._files = new Array();
+        this._files = {
+        };
     }
     Manifest.load = function load(manifestPath) {
         var manifest = new Manifest();
@@ -312,11 +362,12 @@ var Manifest = (function () {
         }
         return Q.nfcall(fs.readFile, manifestPath, 'utf8').then(function (content) {
             var filePaths = content.split("\n");
-            var files = new Array();
+            var files = {
+            };
             filePaths.forEach(function (filePath) {
                 var file = filePath.trim();
                 if(file != "") {
-                    files[file] = file;
+                    files[file] = new ManifestEntry(file);
                 }
             });
             manifest._files = files;
@@ -335,8 +386,8 @@ var Manifest = (function () {
         var manifestFileContent = "";
         var filesForOutput = new Array();
         var i = 0;
-        for(var file in manifest._files) {
-            filesForOutput[i] = file;
+        for(var key in manifest._files) {
+            filesForOutput[i] = manifest._files[key].filename;
             i++;
         }
         var manifestFileContent = filesForOutput.join("\n");
@@ -354,7 +405,7 @@ var Manifest = (function () {
         Ensure.argNotNull(rootPath, "rootPath");
         var relativePath = pathUtil.relative(rootPath, path);
         relativePath = (targetSubFolder ? nodePath.join(targetSubFolder, relativePath) : relativePath);
-        this._files[relativePath] = relativePath;
+        this._files[relativePath] = new ManifestEntry(relativePath);
     };
     return Manifest;
 })();
@@ -411,7 +462,7 @@ function shouldIgnore(path, rootPath, ignoreList) {
 function copyFile(fromFile, toFilePath, whatIf) {
     Ensure.argNotNull(fromFile, "fromFile");
     Ensure.argNotNull(toFilePath, "toFilePath");
-    log("Copying file: '" + fromFile.relativePath() + "'");
+    log("Copying file: '" + fromFile.relativePath() + "'" + "@" + fromFile.version());
     if(!whatIf) {
         return Utils.attempt(function () {
             var promise = copyFileInternal(fromFile, toFilePath);
@@ -540,7 +591,12 @@ function kuduSyncDirectory(from, to, fromRootPath, toRootPath, targetSubFolder, 
             });
         }, function () {
             return Utils.mapSerialized(from.subDirectoriesList(), function (fromSubDirectory) {
-                var toSubDirectory = new DirectoryInfo(pathUtil.join(to.path(), fromSubDirectory.name()), toRootPath);
+                var toSubDirectory = to.subDirectoriesList().find(function (sub) {
+                    return sub.name() == fromSubDirectory.name();
+                });
+                if(!toSubDirectory) {
+                    toSubDirectory = new DirectoryInfo(pathUtil.join(to.path(), fromSubDirectory.name()), toRootPath);
+                }
                 return kuduSyncDirectory(fromSubDirectory, toSubDirectory, fromRootPath, toRootPath, targetSubFolder, manifest, outManifest, ignoreManifest, ignoreList, whatIf);
             });
         });

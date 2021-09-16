@@ -1,12 +1,16 @@
 ///<reference path='FileInfoBase.ts'/>
 var nodePath = require("path");
 
+class ManifestEntry {
+    constructor(public filename: string) {}
+}
+
 class Manifest {
 
-    private _files: string[];
+    private _files: { [key: string] : ManifestEntry; };
 
     constructor () {
-        this._files = new string[];
+        this._files = {};
     }
 
     static load(manifestPath: string) {
@@ -19,12 +23,12 @@ class Manifest {
         return Q.nfcall(fs.readFile, manifestPath, 'utf8').then(
             function(content?) {
                 var filePaths = content.split("\n");
-                var files = new string[];
+                var files = {}
                 filePaths.forEach(
                     function (filePath) {
                         var file = filePath.trim();
                         if (file != "") {
-                            files[file] = file;
+                            files[file] = new ManifestEntry(file);
                         }
                     }
                 );
@@ -50,8 +54,8 @@ class Manifest {
         var filesForOutput = new string[];
 
         var i = 0;
-        for (var file in manifest._files) {
-            filesForOutput[i] = file;
+        for (var key in manifest._files) {
+            filesForOutput[i] = manifest._files[key].filename;
             i++
         }
 
@@ -74,10 +78,10 @@ class Manifest {
         Ensure.argNotNull(path, "path");
         Ensure.argNotNull(rootPath, "rootPath");
 
-        var relativePath = pathUtil.relative(rootPath, path);
+        var relativePath: string = pathUtil.relative(rootPath, path);
         relativePath = (targetSubFolder
                 ? nodePath.join(targetSubFolder, relativePath)
                 : relativePath);
-        this._files[relativePath] = relativePath;
+        this._files[relativePath] = new ManifestEntry(relativePath);
     }
 }

@@ -68,7 +68,7 @@ function copyFile(fromFile: FileInfo, toFilePath: string, whatIf: bool) : Promis
     Ensure.argNotNull(fromFile, "fromFile");
     Ensure.argNotNull(toFilePath, "toFilePath");
 
-    log("Copying file: '" + fromFile.relativePath() + "'");
+    log("Copying file: '" + fromFile.relativePath() + "'" + "@" + fromFile.version());
 
     if (!whatIf) {
         return Utils.attempt(() => {
@@ -267,7 +267,9 @@ function kuduSyncDirectory(from: DirectoryInfo, to: DirectoryInfo, fromRootPath:
                 return Utils.mapSerialized(
                     from.subDirectoriesList(),
                     (fromSubDirectory: DirectoryInfo) => {
-                        var toSubDirectory = new DirectoryInfo(pathUtil.join(to.path(), fromSubDirectory.name()), toRootPath);
+                        // try to reuse existing toSubDirectory, because it may contain version info from its parent
+                        var toSubDirectory: DirectoryInfo = to.subDirectoriesList().find(sub => sub.name() == fromSubDirectory.name());
+                        if (!toSubDirectory) toSubDirectory = new DirectoryInfo(pathUtil.join(to.path(), fromSubDirectory.name()), toRootPath);
                         return kuduSyncDirectory(
                             fromSubDirectory,
                             toSubDirectory,
