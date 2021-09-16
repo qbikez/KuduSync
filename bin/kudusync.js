@@ -173,10 +173,8 @@ var FileInfo = (function (_super) {
             return false;
         }
         if(!!this.version() && !!otherFile.version() && this.version() != otherFile.version()) {
-            console.log("copying different version file '" + this.name() + "'@" + this.version() + " != '" + otherFile.name() + "'@" + otherFile.version());
             return false;
         }
-        console.log("skipping same file '" + this.name() + "'@" + this.version() + " == '" + otherFile.name() + "'@" + otherFile.version());
         return true;
     };
     return FileInfo;
@@ -261,18 +259,15 @@ var DirectoryInfo = (function (_super) {
                     if(!!version) {
                         _this._version = version;
                     }
-                    console.log("version is: ", _this._version);
                     files.forEach(function (file) {
                         var path = pathUtil.join(_this.path(), file.fileName);
                         if(file.fileName !== "." && file.fileName !== "..") {
                             if(file.isDirectory) {
-                                console.log('found dir', path, "@", _this._version);
                                 var directoryInfo = new DirectoryInfo(path, _this.rootPath(), _this._version);
                                 directoryInfo.setExists(true);
                                 subDirectoriesMapping[file.fileName.toUpperCase()] = directoryInfo;
                                 subDirectoriesList.push(directoryInfo);
                             } else {
-                                console.log('found file', path);
                                 var fileInfo = new FileInfo(path, _this.rootPath(), file.size, file.modifiedTime, _this._version);
                                 filesMapping[file.fileName.toUpperCase()] = fileInfo;
                                 filesList.push(fileInfo);
@@ -319,7 +314,6 @@ var DirectoryInfo = (function (_super) {
         return false;
     };
     DirectoryInfo.prototype.determineVersion = function (files) {
-        console.log("looking for version file in ", this.path(), "parent version:", this._version);
         for(var i = 0; i < files.length; i++) {
             var file = files[i];
             if(file.fileName === "." || file.fileName === ".." || file.isDirectory) {
@@ -327,7 +321,6 @@ var DirectoryInfo = (function (_super) {
             }
             if(file.fileName == 'package.json') {
                 var path = pathUtil.join(this.path(), file.fileName);
-                console.log("parsing version file " + path);
                 try  {
                     var content = fs.readFileSync(path);
                     var packageJson = JSON.parse(content);
@@ -344,16 +337,9 @@ var DirectoryInfo = (function (_super) {
     return DirectoryInfo;
 })(FileInfoBase);
 var nodePath = require("path");
-var ManifestEntry = (function () {
-    function ManifestEntry(filename) {
-        this.filename = filename;
-    }
-    return ManifestEntry;
-})();
 var Manifest = (function () {
     function Manifest() {
-        this._files = {
-        };
+        this._files = new Array();
     }
     Manifest.load = function load(manifestPath) {
         var manifest = new Manifest();
@@ -362,12 +348,11 @@ var Manifest = (function () {
         }
         return Q.nfcall(fs.readFile, manifestPath, 'utf8').then(function (content) {
             var filePaths = content.split("\n");
-            var files = {
-            };
+            var files = new Array();
             filePaths.forEach(function (filePath) {
                 var file = filePath.trim();
                 if(file != "") {
-                    files[file] = new ManifestEntry(file);
+                    files[file] = file;
                 }
             });
             manifest._files = files;
@@ -386,8 +371,8 @@ var Manifest = (function () {
         var manifestFileContent = "";
         var filesForOutput = new Array();
         var i = 0;
-        for(var key in manifest._files) {
-            filesForOutput[i] = manifest._files[key].filename;
+        for(var file in manifest._files) {
+            filesForOutput[i] = file;
             i++;
         }
         var manifestFileContent = filesForOutput.join("\n");
@@ -405,7 +390,7 @@ var Manifest = (function () {
         Ensure.argNotNull(rootPath, "rootPath");
         var relativePath = pathUtil.relative(rootPath, path);
         relativePath = (targetSubFolder ? nodePath.join(targetSubFolder, relativePath) : relativePath);
-        this._files[relativePath] = new ManifestEntry(relativePath);
+        this._files[relativePath] = relativePath;
     };
     return Manifest;
 })();
